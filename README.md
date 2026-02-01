@@ -11,10 +11,10 @@ A beautiful, simple, mobile-first, and optimized website that displays the curre
 
 ## Tech Stack
 
-- [Vite](https://vitejs.dev/)
+- [Vite](https://vitejs.dev/) + [Cloudflare Vite Plugin](https://developers.cloudflare.com/workers/vite-plugin/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [React](https://reactjs.org/)
-- [Cloudflare Pages](https://pages.cloudflare.com/) - Hosting & CDN
+- [Cloudflare Workers](https://workers.cloudflare.com/) - Hosting & CDN
 
 ## Development
 
@@ -22,7 +22,7 @@ A beautiful, simple, mobile-first, and optimized website that displays the curre
 # Install dependencies
 npm install
 
-# Start dev server
+# Start dev server (runs in Cloudflare Workers runtime)
 npm run dev
 
 # Build for production
@@ -34,20 +34,25 @@ npm run preview
 
 ## Deployment
 
-This project is deployed automatically via Cloudflare Pages Git integration.
+This project uses the unified Cloudflare Workers platform with static assets.
 
-### Setup Git-Connected Deployment
+### Setup Git-Connected Deployment (Workers Builds)
 
 1. Push your code to GitHub
 2. Log into the [Cloudflare Dashboard](https://dash.cloudflare.com/)
-3. Go to **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**
+3. Go to **Workers & Pages** → **Create** → **Create Worker** → **Import from Git**
 4. Select your GitHub repository
-5. Configure the build settings:
-   - **Build command**: `npm run build`
-   - **Build output directory**: `dist`
-6. Click **Save and Deploy**
+5. Cloudflare will auto-detect settings from `wrangler.jsonc`
+6. Click **Deploy**
 
-Cloudflare will automatically build and deploy on every push to your main branch, with preview deployments for pull requests.
+Cloudflare Workers Builds will automatically build and deploy on every push to your main branch.
+
+### Manual Deployment
+
+```bash
+# Build and deploy to Cloudflare Workers
+npm run deploy
+```
 
 ## License
 
