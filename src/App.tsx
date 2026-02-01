@@ -433,7 +433,7 @@ function App() {
                   </p>
                   <p>
                     Vehicles parked on municipal streets during enforcement may be{' '}
-                    <span className="info-card__highlight">ticketed ($50 fine)</span>{' '}
+                    <span className="info-card__highlight">ticketed ($80+ fine)</span>{' '}
                     or <span className="info-card__highlight">towed</span>.
                   </p>
                   <p>
