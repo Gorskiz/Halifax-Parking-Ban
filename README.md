@@ -30,14 +30,11 @@ npm run build
 
 # Preview production build locally
 npm run preview
-
-# Test with Cloudflare Pages dev server
-npm run pages:dev
 ```
 
 ## Deployment
 
-This project is configured for automatic deployment via Cloudflare Pages Git integration.
+This project is deployed automatically via Cloudflare Pages Git integration.
 
 ### Setup Git-Connected Deployment
 
@@ -51,16 +48,6 @@ This project is configured for automatic deployment via Cloudflare Pages Git int
 6. Click **Save and Deploy**
 
 Cloudflare will automatically build and deploy on every push to your main branch, with preview deployments for pull requests.
-
-### Manual Deployment
-
-```bash
-# Deploy to production
-npm run deploy
-
-# Deploy to preview (feature branch)
-npm run deploy:preview
-```
 
 ## License
 
