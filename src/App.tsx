@@ -197,8 +197,8 @@ function App() {
     const shareData = {
       title: 'Halifax Parking Ban Status',
       text: status?.isActive
-        ? `⚠️ Halifax parking ban is ON! Enforcement ${status.enforcementTime}`
-        : '✅ Halifax parking ban is OFF - Park freely!',
+        ? `Halifax parking ban is ON! Enforcement ${status.enforcementTime}`
+        : 'Halifax parking ban is OFF - Park freely!',
       url: window.location.href,
     };
 
@@ -252,9 +252,7 @@ function App() {
         fontSize: `${sizes[i]}rem`,
       };
       flakes.push(
-        <span key={i} className="snowflake" style={style}>
-          ❄
-        </span>
+        <span key={i} className="snowflake" style={style}></span>
       );
     }
     return flakes;
@@ -271,7 +269,6 @@ function App() {
       <header className="header">
         <div className="container">
           <div className="header__logo">
-            <span className="header__logo-icon">🚗</span>
             <span>Halifax Parking Ban</span>
           </div>
         </div>
@@ -286,7 +283,6 @@ function App() {
           </div>
         ) : error ? (
           <div className="error" role="alert">
-            <div className="error__icon">⚠️</div>
             <h2 className="error__title">Unable to Load Status</h2>
             <p className="error__message">{error}</p>
             <div className="error__retry">
@@ -319,7 +315,6 @@ function App() {
               {status.isActive && (
                 <div className="enforcement-info">
                   <div className="enforcement-info__time">
-                    <span className="enforcement-info__time-icon">🕐</span>
                     <span>Enforcement: {status.enforcementTime}</span>
                   </div>
                   {status.enforcementDate && (
@@ -393,7 +388,7 @@ function App() {
               </div>
 
               <div className="zone-map-hint">
-                📍 Not sure which zone you're in?{' '}
+                Not sure which zone you're in?{' '}
                 <a
                   href="https://www.halifax.ca/transportation/winter-operations/parking-ban"
                   target="_blank"
@@ -408,7 +403,6 @@ function App() {
             <section className="info-section" aria-label="Additional information">
               <div className="info-card">
                 <h3 className="info-card__title">
-                  <span className="info-card__title-icon">ℹ️</span>
                   What You Need to Know
                 </h3>
                 <div className="info-card__content">
@@ -433,7 +427,6 @@ function App() {
             {/* Share Button */}
             <section className="share-section">
               <button className="share-button" onClick={handleShare}>
-                <span className="share-button__icon">📤</span>
                 Share Status
               </button>
             </section>
@@ -469,13 +462,16 @@ function App() {
             </a>
             <span className="footer__divider">·</span>
             <a
-              href="https://github.com/Gorskiz/halifaxparkingban"
+              href="https://github.com/Gorskiz/Halifax-Parking-Ban"
               target="_blank"
               rel="noopener noreferrer"
               className="footer__link"
             >
               Open Source
             </a>
+          </p>
+          <p className="footer__disclaimer">
+            Not an official Halifax Regional Municipality website. Community built and maintained.
           </p>
         </div>
       </footer>
