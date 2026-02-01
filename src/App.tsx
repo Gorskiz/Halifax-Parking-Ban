@@ -28,6 +28,7 @@ function App() {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [countdown, setCountdown] = useState<string | null>(null);
+  const [mapLightboxOpen, setMapLightboxOpen] = useState(false);
 
   // Parse the RSS feed to determine parking ban status
   const parseRSSFeed = useCallback((xmlText: string): ParkingBanStatus => {
@@ -387,15 +388,34 @@ function App() {
                 </div>
               </div>
 
-              <div className="zone-map-hint">
-                Not sure which zone you're in?{' '}
-                <a
-                  href="https://www.halifax.ca/transportation/winter-operations/parking-ban"
-                  target="_blank"
-                  rel="noopener noreferrer"
+              {/* Zone Map Section */}
+              <div className="zone-map-section">
+                <p className="zone-map-section__label">Not sure which zone you're in?</p>
+                <button
+                  className="zone-map-card"
+                  onClick={() => setMapLightboxOpen(true)}
+                  aria-label="View zone map in full screen"
                 >
-                  View the official zone map
-                </a>
+                  <img
+                    src="https://cdn.halifax.ca/sites/default/files/pages/in-content/2022-12/winter-parking-ban-zone-map-zone-1-and-zone-2.jpg"
+                    alt="Halifax Winter Parking Ban Zone Map showing Zone 1 (Central) and Zone 2 (Non-Central) boundaries"
+                    className="zone-map-card__image"
+                    loading="lazy"
+                  />
+                  <div className="zone-map-card__overlay">
+                    <span className="zone-map-card__overlay-text">Tap to enlarge</span>
+                  </div>
+                </button>
+                <p className="zone-map-section__source">
+                  Source:{' '}
+                  <a
+                    href="https://www.halifax.ca/transportation/winter-operations/parking-ban"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Halifax.ca
+                  </a>
+                </p>
               </div>
             </section>
 
@@ -475,6 +495,31 @@ function App() {
           </p>
         </div>
       </footer>
+
+      {/* Zone Map Lightbox Modal */}
+      {mapLightboxOpen && (
+        <div
+          className="lightbox"
+          onClick={() => setMapLightboxOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Zone map enlarged view"
+        >
+          <button
+            className="lightbox__close"
+            onClick={() => setMapLightboxOpen(false)}
+            aria-label="Close map"
+          >
+            Close
+          </button>
+          <img
+            src="https://cdn.halifax.ca/sites/default/files/pages/in-content/2022-12/winter-parking-ban-zone-map-zone-1-and-zone-2.jpg"
+            alt="Halifax Winter Parking Ban Zone Map showing Zone 1 (Central) and Zone 2 (Non-Central) boundaries"
+            className="lightbox__image"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
 
       {/* Toast Notification */}
       <div
