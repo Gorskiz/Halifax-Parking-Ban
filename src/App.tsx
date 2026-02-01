@@ -30,6 +30,11 @@ function App() {
   const [countdown, setCountdown] = useState<string | null>(null);
   const [mapLightboxOpen, setMapLightboxOpen] = useState(false);
 
+  // Accessibility refs
+  const mapButtonRef = useRef<HTMLButtonElement>(null);
+  const lightboxCloseRef = useRef<HTMLButtonElement>(null);
+  const mainContentRef = useRef<HTMLElement>(null);
+
   // Parse the RSS feed to determine parking ban status
   const parseRSSFeed = useCallback((xmlText: string): ParkingBanStatus => {
     const parser = new DOMParser();
@@ -259,35 +264,85 @@ function App() {
     return flakes;
   }, []); // Empty deps - snowflakes never need to change
 
+  // Handle lightbox keyboard navigation and focus management
+  useEffect(() => {
+    if (mapLightboxOpen) {
+      // Focus the close button when modal opens
+      lightboxCloseRef.current?.focus();
+
+      // Trap focus within modal and handle Escape key
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          setMapLightboxOpen(false);
+          mapButtonRef.current?.focus();
+        }
+
+        // Simple focus trap - only close button is focusable
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          lightboxCloseRef.current?.focus();
+        }
+      };
+
+      // Prevent body scroll when modal is open
+      document.body.style.overflow = 'hidden';
+      document.addEventListener('keydown', handleKeyDown);
+
+      return () => {
+        document.body.style.overflow = '';
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    } else {
+      document.body.style.overflow = '';
+    }
+  }, [mapLightboxOpen]);
+
+  // Handle closing lightbox and restoring focus
+  const closeLightbox = useCallback(() => {
+    setMapLightboxOpen(false);
+    // Restore focus to the button that opened the modal
+    setTimeout(() => mapButtonRef.current?.focus(), 0);
+  }, []);
+
   return (
     <div className="app">
+      {/* Skip to main content link for keyboard users */}
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+
       {/* Winter snowfall effect */}
       <div className="snowflakes" aria-hidden="true">
         {snowflakes}
       </div>
 
       {/* Header */}
-      <header className="header">
+      <header className="header" role="banner">
         <div className="container">
-          <div className="header__logo">
+          <h1 className="header__logo">
             <span>Halifax Parking Ban</span>
-          </div>
+          </h1>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="main">
+      <main className="main" id="main-content" ref={mainContentRef} role="main">
         {loading ? (
-          <div className="loading">
-            <div className="loading__spinner" aria-label="Loading"></div>
+          <div className="loading" role="status" aria-live="polite">
+            <div className="loading__spinner" aria-hidden="true"></div>
             <p className="loading__text">Checking parking ban status...</p>
+            <span className="visually-hidden">Loading, please wait.</span>
           </div>
         ) : error ? (
-          <div className="error" role="alert">
+          <div className="error" role="alert" aria-live="assertive">
             <h2 className="error__title">Unable to Load Status</h2>
             <p className="error__message">{error}</p>
             <div className="error__retry">
-              <button className="btn btn-primary" onClick={fetchStatus}>
+              <button
+                className="btn btn-primary"
+                onClick={fetchStatus}
+                aria-label="Retry loading parking ban status"
+              >
                 Try Again
               </button>
             </div>
@@ -295,32 +350,38 @@ function App() {
         ) : status ? (
           <>
             {/* Status Hero */}
-            <section className="status-hero" aria-live="polite">
-              <p className="status-hero__question">
+            <section className="status-hero" aria-labelledby="status-question">
+              <h2 id="status-question" className="status-hero__question">
                 Is the Halifax Overnight Parking Ban in Effect?
-              </p>
+              </h2>
 
-              <div className="status-display">
+              <div className="status-display" aria-live="polite">
                 <div
                   className={`status-display__badge ${status.isActive
                     ? 'status-display__badge--active'
                     : 'status-display__badge--inactive'
                     }`}
                   role="status"
-                  aria-label={status.isActive ? 'Parking ban is active' : 'Parking ban is not active'}
+                  aria-live="polite"
+                  aria-atomic="true"
                 >
-                  {status.isActive ? 'YES' : 'NO'}
+                  <span aria-hidden="true">{status.isActive ? 'YES' : 'NO'}</span>
+                  <span className="visually-hidden">
+                    {status.isActive
+                      ? 'Yes, the parking ban is currently active. Do not park on municipal streets between 1 AM and 6 AM.'
+                      : 'No, the parking ban is not currently active. Street parking is allowed.'}
+                  </span>
                 </div>
               </div>
 
               {status.isActive && (
-                <div className="enforcement-info">
+                <div className="enforcement-info" role="region" aria-label="Enforcement details">
                   <div className="enforcement-info__time">
-                    <span>Enforcement: {status.enforcementTime}</span>
+                    <span>Enforcement: <time>{status.enforcementTime}</time></span>
                   </div>
                   {status.enforcementDate && (
                     <p className="enforcement-info__date">
-                      Starting {status.enforcementDate}
+                      Starting <time>{status.enforcementDate}</time>
                     </p>
                   )}
                 </div>
@@ -328,81 +389,97 @@ function App() {
 
               {/* Countdown when active */}
               {status.isActive && countdown && (
-                <div className="countdown">
-                  <p className="countdown__label">
+                <div className="countdown" role="timer" aria-live="polite" aria-atomic="true">
+                  <p className="countdown__label" id="countdown-label">
                     {countdown === 'IN EFFECT NOW' ? 'Status' : 'Time Until Enforcement'}
                   </p>
-                  <p className="countdown__time">{countdown}</p>
+                  <p className="countdown__time" aria-labelledby="countdown-label">
+                    <span aria-hidden="true">{countdown}</span>
+                    <span className="visually-hidden">
+                      {countdown === 'IN EFFECT NOW'
+                        ? 'The parking ban is in effect now'
+                        : `Time until enforcement: ${countdown.replace(/:/g, ' hours, ').replace(/, ([^,]*)$/, ' minutes, $1 seconds')}`}
+                    </span>
+                  </p>
                 </div>
               )}
             </section>
 
             {/* Zone Status */}
-            <section className="zones" aria-label="Zone status">
-              <h2 className="zones__title">Zone Status</h2>
-              <div className="zones__grid">
+            <section className="zones" aria-labelledby="zones-title">
+              <h2 id="zones-title" className="zones__title">Zone Status</h2>
+              <div className="zones__grid" role="list">
                 {/* Zone 1 */}
-                <div className="zone-card">
+                <article className="zone-card" role="listitem" aria-labelledby="zone1-name">
                   <p className="zone-card__label">Zone 1</p>
-                  <h3 className="zone-card__name">Central Halifax</h3>
+                  <h3 id="zone1-name" className="zone-card__name">Central Halifax</h3>
                   <div
                     className={`zone-card__status ${status.zone1Active
                       ? 'zone-card__status--active'
                       : 'zone-card__status--inactive'
                       }`}
+                    role="status"
+                    aria-label={`Zone 1 Central Halifax: ${status.zone1Active ? 'Parking ban is active' : 'No parking ban'}`}
                   >
                     <span
                       className={`zone-card__status-dot ${status.zone1Active
                         ? 'zone-card__status-dot--active'
                         : 'zone-card__status-dot--inactive'
                         }`}
+                      aria-hidden="true"
                     ></span>
                     {status.zone1Active ? 'Ban Active' : 'No Ban'}
                   </div>
                   <p className="zone-card__description">
                     Downtown Halifax, Peninsula & Central Dartmouth
                   </p>
-                </div>
+                </article>
 
                 {/* Zone 2 */}
-                <div className="zone-card">
+                <article className="zone-card" role="listitem" aria-labelledby="zone2-name">
                   <p className="zone-card__label">Zone 2</p>
-                  <h3 className="zone-card__name">Non-Central</h3>
+                  <h3 id="zone2-name" className="zone-card__name">Non-Central</h3>
                   <div
                     className={`zone-card__status ${status.zone2Active
                       ? 'zone-card__status--active'
                       : 'zone-card__status--inactive'
                       }`}
+                    role="status"
+                    aria-label={`Zone 2 Non-Central: ${status.zone2Active ? 'Parking ban is active' : 'No parking ban'}`}
                   >
                     <span
                       className={`zone-card__status-dot ${status.zone2Active
                         ? 'zone-card__status-dot--active'
                         : 'zone-card__status-dot--inactive'
                         }`}
+                      aria-hidden="true"
                     ></span>
                     {status.zone2Active ? 'Ban Active' : 'No Ban'}
                   </div>
                   <p className="zone-card__description">
                     Bedford, Sackville, Cole Harbour & Surrounding Areas
                   </p>
-                </div>
+                </article>
               </div>
 
               {/* Zone Map Section */}
               <div className="zone-map-section">
-                <p className="zone-map-section__label">Not sure which zone you're in?</p>
+                <p className="zone-map-section__label" id="zone-map-label">Not sure which zone you're in?</p>
                 <button
+                  ref={mapButtonRef}
                   className="zone-map-card"
                   onClick={() => setMapLightboxOpen(true)}
-                  aria-label="View zone map in full screen"
+                  aria-label="View zone map in full screen. Opens a modal dialog."
+                  aria-describedby="zone-map-label"
+                  aria-haspopup="dialog"
                 >
                   <img
                     src="https://cdn.halifax.ca/sites/default/files/pages/in-content/2022-12/winter-parking-ban-zone-map-zone-1-and-zone-2.jpg"
-                    alt="Halifax Winter Parking Ban Zone Map showing Zone 1 (Central) and Zone 2 (Non-Central) boundaries"
+                    alt="Halifax Winter Parking Ban Zone Map. Zone 1 in red covers downtown Halifax peninsula and central Dartmouth. Zone 2 in blue covers Bedford, Sackville, Cole Harbour and surrounding areas."
                     className="zone-map-card__image"
                     loading="lazy"
                   />
-                  <div className="zone-map-card__overlay">
+                  <div className="zone-map-card__overlay" aria-hidden="true">
                     <span className="zone-map-card__overlay-text">Tap to enlarge</span>
                   </div>
                 </button>
@@ -412,29 +489,31 @@ function App() {
                     href="https://www.halifax.ca/transportation/winter-operations/parking-ban"
                     target="_blank"
                     rel="noopener noreferrer"
+                    aria-label="Halifax.ca parking ban information (opens in new tab)"
                   >
                     Halifax.ca
+                    <span className="visually-hidden"> (opens in new tab)</span>
                   </a>
                 </p>
               </div>
             </section>
 
             {/* Info Section */}
-            <section className="info-section" aria-label="Additional information">
+            <section className="info-section" aria-labelledby="info-title">
               <div className="info-card">
-                <h3 className="info-card__title">
+                <h3 id="info-title" className="info-card__title">
                   What You Need to Know
                 </h3>
                 <div className="info-card__content">
                   <p>
                     The overnight winter parking ban is enforced from{' '}
-                    <span className="info-card__highlight">1:00 AM to 6:00 AM</span>{' '}
+                    <strong className="info-card__highlight"><time>1:00 AM</time> to <time>6:00 AM</time></strong>{' '}
                     during winter weather events to allow crews to clear streets.
                   </p>
                   <p>
                     Vehicles parked on municipal streets during enforcement may be{' '}
-                    <span className="info-card__highlight">ticketed ($80+ fine)</span>{' '}
-                    or <span className="info-card__highlight">towed</span>.
+                    <strong className="info-card__highlight">ticketed ($80+ fine)</strong>{' '}
+                    or <strong className="info-card__highlight">towed</strong>.
                   </p>
                   <p>
                     The ban applies to all municipal streets in the affected zones.
@@ -445,22 +524,30 @@ function App() {
             </section>
 
             {/* Share Button */}
-            <section className="share-section">
-              <button className="share-button" onClick={handleShare}>
+            <section className="share-section" aria-label="Share parking ban status">
+              <button
+                className="share-button"
+                onClick={handleShare}
+                aria-label={status.isActive
+                  ? 'Share that the parking ban is active'
+                  : 'Share that the parking ban is not active'}
+              >
                 Share Status
               </button>
             </section>
 
             {/* Last Updated */}
-            <p className="last-updated">
-              Last updated: {formatRelativeTime(status.lastUpdate)}
+            <p className="last-updated" role="contentinfo">
+              <span>Last updated: <time dateTime={status.lastUpdate.toISOString()}>{formatRelativeTime(status.lastUpdate)}</time></span>
               {' · '}
               <a
                 href={status.link || 'https://www.halifax.ca/transportation/winter-operations/parking-ban'}
                 target="_blank"
                 rel="noopener noreferrer"
+                aria-label="View source on Halifax.ca (opens in new tab)"
               >
                 View source
+                <span className="visually-hidden"> (opens in new tab)</span>
               </a>
             </p>
           </>
@@ -468,30 +555,36 @@ function App() {
       </main>
 
       {/* Footer */}
-      <footer className="footer">
+      <footer className="footer" role="contentinfo">
         <div className="container">
-          <p className="footer__content">
-            Data from{' '}
-            <a
-              href="https://www.halifax.ca"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="footer__link"
-            >
-              Halifax.ca
-            </a>
-            <span className="footer__divider">·</span>
-            <a
-              href="https://github.com/Gorskiz/Halifax-Parking-Ban"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="footer__link"
-            >
-              Open Source
-            </a>
-          </p>
+          <nav aria-label="Footer links" className="footer__nav">
+            <p className="footer__content">
+              Data from{' '}
+              <a
+                href="https://www.halifax.ca"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="footer__link"
+                aria-label="Halifax.ca (opens in new tab)"
+              >
+                Halifax.ca
+                <span className="visually-hidden"> (opens in new tab)</span>
+              </a>
+              <span className="footer__divider" aria-hidden="true">·</span>
+              <a
+                href="https://github.com/Gorskiz/Halifax-Parking-Ban"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="footer__link"
+                aria-label="View source code on GitHub (opens in new tab)"
+              >
+                Open Source
+                <span className="visually-hidden"> (opens in new tab)</span>
+              </a>
+            </p>
+          </nav>
           <p className="footer__disclaimer">
-            Not an official Halifax Regional Municipality website. Community built and maintained.
+            <strong>Disclaimer:</strong> Not an official Halifax Regional Municipality website. Community built and maintained.
           </p>
         </div>
       </footer>
@@ -500,21 +593,27 @@ function App() {
       {mapLightboxOpen && (
         <div
           className="lightbox"
-          onClick={() => setMapLightboxOpen(false)}
+          onClick={closeLightbox}
           role="dialog"
           aria-modal="true"
-          aria-label="Zone map enlarged view"
+          aria-labelledby="lightbox-title"
+          aria-describedby="lightbox-description"
         >
+          <h2 id="lightbox-title" className="visually-hidden">Zone Map - Enlarged View</h2>
+          <p id="lightbox-description" className="visually-hidden">
+            Press Escape or click Close to return to the main page.
+          </p>
           <button
+            ref={lightboxCloseRef}
             className="lightbox__close"
-            onClick={() => setMapLightboxOpen(false)}
-            aria-label="Close map"
+            onClick={closeLightbox}
+            aria-label="Close zone map modal"
           >
-            Close
+            Close <span className="visually-hidden">(Press Escape)</span>
           </button>
           <img
             src="https://cdn.halifax.ca/sites/default/files/pages/in-content/2022-12/winter-parking-ban-zone-map-zone-1-and-zone-2.jpg"
-            alt="Halifax Winter Parking Ban Zone Map showing Zone 1 (Central) and Zone 2 (Non-Central) boundaries"
+            alt="Halifax Winter Parking Ban Zone Map. Zone 1 in red covers downtown Halifax peninsula and central Dartmouth. Zone 2 in blue covers Bedford, Sackville, Cole Harbour and surrounding areas. Press Escape to close."
             className="lightbox__image"
             onClick={(e) => e.stopPropagation()}
           />
@@ -524,8 +623,9 @@ function App() {
       {/* Toast Notification */}
       <div
         className={`toast ${toastVisible ? 'toast--visible' : ''}`}
-        role="alert"
-        aria-live="assertive"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
       >
         {toastMessage}
       </div>

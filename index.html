@@ -30,6 +30,7 @@
 
   <!-- Theme Color for Mobile -->
   <meta name="theme-color" content="#003366" />
+  <meta name="color-scheme" content="dark" />
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,6 +40,15 @@
 </head>
 
 <body>
+  <!-- Noscript fallback for accessibility -->
+  <noscript>
+    <div style="padding: 2rem; background: #003366; color: white; text-align: center;">
+      <h1>Halifax Parking Ban Status</h1>
+      <p>JavaScript is required to view the current parking ban status.</p>
+      <p>Please enable JavaScript or visit <a href="https://www.halifax.ca/transportation/winter-operations/parking-ban"
+          style="color: #80b8eb;">Halifax.ca</a> for parking ban information.</p>
+    </div>
+  </noscript>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
