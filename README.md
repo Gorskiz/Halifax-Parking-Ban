@@ -14,6 +14,53 @@ A beautiful, simple, mobile-first, and optimized website that displays the curre
 - [Vite](https://vitejs.dev/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [React](https://reactjs.org/)
+- [Cloudflare Pages](https://pages.cloudflare.com/) - Hosting & CDN
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Start dev server
+npm run dev
+
+# Build for production
+npm run build
+
+# Preview production build locally
+npm run preview
+
+# Test with Cloudflare Pages dev server
+npm run pages:dev
+```
+
+## Deployment
+
+This project is configured for automatic deployment via Cloudflare Pages Git integration.
+
+### Setup Git-Connected Deployment
+
+1. Push your code to GitHub
+2. Log into the [Cloudflare Dashboard](https://dash.cloudflare.com/)
+3. Go to **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**
+4. Select your GitHub repository
+5. Configure the build settings:
+   - **Build command**: `npm run build`
+   - **Build output directory**: `dist`
+6. Click **Save and Deploy**
+
+Cloudflare will automatically build and deploy on every push to your main branch, with preview deployments for pull requests.
+
+### Manual Deployment
+
+```bash
+# Deploy to production
+npm run deploy
+
+# Deploy to preview (feature branch)
+npm run deploy:preview
+```
 
 ## License
 
