@@ -112,31 +112,43 @@ function App() {
     };
   }, []);
 
-  // Fetch the RSS feed
+  // Fetch with a timeout using AbortController
+  const fetchWithTimeout = useCallback(async (url: string, timeoutMs: number): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      return response;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }, []);
+
+  // Fetch the RSS feed - race all proxies concurrently with individual timeouts
   const fetchStatus = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    for (const proxyFn of CORS_PROXIES) {
-      try {
-        const response = await fetch(proxyFn(RSS_FEED_URL));
-        if (!response.ok) continue;
+    const TIMEOUT_MS = 8000; // 8 seconds per proxy
 
-        const xmlText = await response.text();
-        const parsedStatus = parseRSSFeed(xmlText);
-        setStatus(parsedStatus);
-        setLoading(false);
-        return;
-      } catch (err) {
-        console.warn('Proxy failed, trying next...', err);
-        continue;
-      }
+    try {
+      // Race all proxies concurrently - first successful response wins
+      const result = await Promise.any(
+        CORS_PROXIES.map(async (proxyFn) => {
+          const response = await fetchWithTimeout(proxyFn(RSS_FEED_URL), TIMEOUT_MS);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const xmlText = await response.text();
+          return parseRSSFeed(xmlText);
+        })
+      );
+      setStatus(result);
+      setLoading(false);
+    } catch (err) {
+      console.warn('All proxies failed:', err);
+      setError('Unable to fetch parking ban status. Please try again later.');
+      setLoading(false);
     }
-
-    // All proxies failed
-    setError('Unable to fetch parking ban status. Please try again later.');
-    setLoading(false);
-  }, [parseRSSFeed]);
+  }, [parseRSSFeed, fetchWithTimeout]);
 
   // Ref to track countdown interval for cleanup
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
