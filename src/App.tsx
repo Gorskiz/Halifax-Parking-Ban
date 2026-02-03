@@ -13,12 +13,15 @@ interface ParkingBanStatus {
   link: string;
 }
 
-// RSS Feed URL (using a CORS proxy for client-side fetching)
+// RSS Feed URL
 const RSS_FEED_URL = 'https://www.halifax.ca/news/category/rss-feed?category=22';
-// CORS proxy options
-const CORS_PROXIES = [
+
+// Fetch sources in order of preference:
+// 1. Our own Cloudflare Worker proxy (most reliable, no rate limits)
+// 2. AllOrigins as fallback (free tier, may have occasional issues)
+const FETCH_SOURCES = [
+  () => '/api/rss', // Local Cloudflare Worker proxy - no CORS issues
   (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
 ];
 
 // Cache configuration
@@ -209,13 +212,18 @@ function App() {
     // Create and store the fetch promise
     const fetchPromise = (async (): Promise<ParkingBanStatus> => {
       try {
-        // Race all proxies concurrently - first successful response wins
+        // Race all sources concurrently - first successful response wins
         const result = await Promise.any(
-          CORS_PROXIES.map(async (proxyFn) => {
-            const response = await fetchWithTimeout(proxyFn(RSS_FEED_URL), TIMEOUT_MS);
+          FETCH_SOURCES.map(async (sourceFn) => {
+            const url = sourceFn(RSS_FEED_URL);
+            const response = await fetchWithTimeout(url, TIMEOUT_MS);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const xmlText = await response.text();
-            return parseRSSFeed(xmlText);
+            const text = await response.text();
+            // Verify we got XML, not an error JSON response
+            if (text.trim().startsWith('{')) {
+              throw new Error('Received JSON error instead of XML');
+            }
+            return parseRSSFeed(text);
           })
         );
 
