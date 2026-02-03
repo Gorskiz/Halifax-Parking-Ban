@@ -21,6 +21,15 @@ const CORS_PROXIES = [
   (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
 ];
 
+// Cache configuration
+const CACHE_KEY = 'halifax-parking-ban-cache';
+const CACHE_DURATION_MS = 120000; // 2 minutes
+
+interface CachedData {
+  status: ParkingBanStatus;
+  timestamp: number;
+}
+
 function App() {
   const [status, setStatus] = useState<ParkingBanStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +43,48 @@ function App() {
   const mapButtonRef = useRef<HTMLButtonElement>(null);
   const lightboxCloseRef = useRef<HTMLButtonElement>(null);
   const mainContentRef = useRef<HTMLElement>(null);
+
+  // Track in-flight requests to prevent duplicate fetches
+  const fetchInProgressRef = useRef<Promise<ParkingBanStatus> | null>(null);
+
+  // Cache management functions
+  const getCachedData = useCallback((): ParkingBanStatus | null => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (!cached) return null;
+
+      const data: CachedData = JSON.parse(cached);
+      const now = Date.now();
+
+      // Check if cache is still valid
+      if (now - data.timestamp < CACHE_DURATION_MS) {
+        // Reconstruct Date objects (they're serialized as strings in localStorage)
+        return {
+          ...data.status,
+          lastUpdate: new Date(data.status.lastUpdate),
+        };
+      }
+
+      // Cache expired, remove it
+      localStorage.removeItem(CACHE_KEY);
+      return null;
+    } catch (err) {
+      console.warn('Failed to read cache:', err);
+      return null;
+    }
+  }, []);
+
+  const setCachedData = useCallback((status: ParkingBanStatus): void => {
+    try {
+      const data: CachedData = {
+        status,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    } catch (err) {
+      console.warn('Failed to write cache:', err);
+    }
+  }, []);
 
   // Parse the RSS feed to determine parking ban status
   const parseRSSFeed = useCallback((xmlText: string): ParkingBanStatus => {
@@ -126,21 +177,61 @@ function App() {
 
   // Fetch the RSS feed - race all proxies concurrently with individual timeouts
   const fetchStatus = useCallback(async () => {
+    // Check cache first
+    const cachedStatus = getCachedData();
+    if (cachedStatus) {
+      // Return cached data immediately
+      setStatus(cachedStatus);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    // If a fetch is already in progress, wait for it instead of starting a new one
+    if (fetchInProgressRef.current) {
+      try {
+        const result = await fetchInProgressRef.current;
+        setStatus(result);
+        setLoading(false);
+        setError(null);
+        return;
+      } catch (err) {
+        // The in-progress fetch failed, continue to try again
+        fetchInProgressRef.current = null;
+      }
+    }
+
     setLoading(true);
     setError(null);
 
     const TIMEOUT_MS = 8000; // 8 seconds per proxy
 
+    // Create and store the fetch promise
+    const fetchPromise = (async (): Promise<ParkingBanStatus> => {
+      try {
+        // Race all proxies concurrently - first successful response wins
+        const result = await Promise.any(
+          CORS_PROXIES.map(async (proxyFn) => {
+            const response = await fetchWithTimeout(proxyFn(RSS_FEED_URL), TIMEOUT_MS);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const xmlText = await response.text();
+            return parseRSSFeed(xmlText);
+          })
+        );
+
+        // Cache the successful result
+        setCachedData(result);
+        return result;
+      } finally {
+        // Clear the in-progress reference when done
+        fetchInProgressRef.current = null;
+      }
+    })();
+
+    fetchInProgressRef.current = fetchPromise;
+
     try {
-      // Race all proxies concurrently - first successful response wins
-      const result = await Promise.any(
-        CORS_PROXIES.map(async (proxyFn) => {
-          const response = await fetchWithTimeout(proxyFn(RSS_FEED_URL), TIMEOUT_MS);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const xmlText = await response.text();
-          return parseRSSFeed(xmlText);
-        })
-      );
+      const result = await fetchPromise;
       setStatus(result);
       setLoading(false);
     } catch (err) {
@@ -148,7 +239,7 @@ function App() {
       setError('Unable to fetch parking ban status. Please try again later.');
       setLoading(false);
     }
-  }, [parseRSSFeed, fetchWithTimeout]);
+  }, [parseRSSFeed, fetchWithTimeout, getCachedData, setCachedData]);
 
   // Ref to track countdown interval for cleanup
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
