@@ -38,6 +38,30 @@ export const onRequest: PagesFunction = async (context) => {
 
     const xmlText = await response.text();
 
+    // Validate that we received XML, not HTML (bot block page)
+    const trimmedText = xmlText.trim();
+    const isXML = trimmedText.startsWith('<?xml') ||
+                   trimmedText.startsWith('<rss') ||
+                   trimmedText.startsWith('<feed');
+    const isHTML = trimmedText.toLowerCase().startsWith('<!doctype html') ||
+                    trimmedText.toLowerCase().startsWith('<html');
+
+    if (isHTML || !isXML) {
+      return new Response(
+        JSON.stringify({
+          error: 'Halifax.ca returned HTML instead of XML. The site may be blocking automated requests.',
+          details: 'Received HTML/non-XML response from upstream'
+        }),
+        {
+          status: 503,
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+    }
+
     return new Response(xmlText, {
       status: 200,
       headers: {
