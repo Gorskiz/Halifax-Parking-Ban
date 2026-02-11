@@ -91,8 +91,35 @@ function App() {
 
   // Parse the RSS feed to determine parking ban status
   const parseRSSFeed = useCallback((xmlText: string): ParkingBanStatus => {
+    // Validate that we received XML, not HTML (bot block page)
+    const trimmedText = xmlText.trim();
+    const isXML = trimmedText.startsWith('<?xml') ||
+                   trimmedText.startsWith('<rss') ||
+                   trimmedText.startsWith('<feed');
+    const isHTML = trimmedText.toLowerCase().startsWith('<!doctype html') ||
+                    trimmedText.toLowerCase().startsWith('<html') ||
+                    trimmedText.includes('<title>Just a moment...</title>') || // Cloudflare challenge
+                    trimmedText.includes('cf-browser-verification'); // Cloudflare verification
+
+    if (isHTML || !isXML) {
+      throw new Error('Halifax.ca returned HTML instead of XML. The site may be blocking automated requests. Please try again later or visit Halifax.ca directly.');
+    }
+
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+    // Check for XML parsing errors
+    const parserError = xmlDoc.querySelector('parsererror');
+    if (parserError) {
+      throw new Error('Failed to parse RSS feed. The response may be malformed or blocked by Halifax.ca.');
+    }
+
+    // Validate RSS structure
+    const rssRoot = xmlDoc.querySelector('rss, feed');
+    if (!rssRoot) {
+      throw new Error('Invalid RSS feed structure. Halifax.ca may be returning an error page.');
+    }
+
     const items = xmlDoc.querySelectorAll('item');
 
     let latestBanItem: Element | null = null;
@@ -226,12 +253,27 @@ function App() {
           FETCH_SOURCES.map(async (sourceFn) => {
             const url = sourceFn(RSS_FEED_URL);
             const response = await fetchWithTimeout(url, TIMEOUT_MS);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const text = await response.text();
-            // Verify we got XML, not an error JSON response
-            if (text.trim().startsWith('{')) {
-              throw new Error('Received JSON error instead of XML');
+
+            // Check if we got a JSON error response
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || `HTTP ${response.status}`);
             }
+
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+
+            const text = await response.text();
+
+            // Verify we got XML, not an error JSON response (double-check)
+            if (text.trim().startsWith('{')) {
+              const errorData = JSON.parse(text);
+              throw new Error(errorData.error || 'Received JSON error instead of XML');
+            }
+
+            // parseRSSFeed will throw if validation fails
             return parseRSSFeed(text);
           })
         );
@@ -253,7 +295,22 @@ function App() {
       setLoading(false);
     } catch (err) {
       console.warn('All proxies failed:', err);
-      setError('Unable to fetch parking ban status. Please try again later.');
+
+      // Provide specific error message based on the error type
+      let errorMessage = 'Unable to fetch parking ban status. Please try again later.';
+
+      if (err instanceof Error) {
+        const errMsg = err.message.toLowerCase();
+        if (errMsg.includes('html instead of xml') || errMsg.includes('blocking automated')) {
+          errorMessage = 'Halifax.ca is currently blocking automated requests. Please visit Halifax.ca directly or try again in a few minutes.';
+        } else if (errMsg.includes('parse') || errMsg.includes('malformed')) {
+          errorMessage = 'Unable to read the parking ban feed. Halifax.ca may be experiencing technical issues.';
+        } else if (errMsg.includes('timeout') || errMsg.includes('aborted')) {
+          errorMessage = 'Request timed out. Please check your internet connection and try again.';
+        }
+      }
+
+      setError(errorMessage);
       setLoading(false);
     }
   }, [parseRSSFeed, fetchWithTimeout, getCachedData, setCachedData]);
@@ -465,6 +522,16 @@ function App() {
               >
                 Try Again
               </button>
+              <a
+                href="https://www.halifax.ca/transportation/winter-operations/parking-ban"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+                aria-label="Check status on Halifax.ca (opens in new tab)"
+              >
+                Visit Halifax.ca
+                <span className="visually-hidden"> (opens in new tab)</span>
+              </a>
             </div>
           </div>
         ) : status ? (
