@@ -101,13 +101,17 @@ function App() {
     // Find the most recent parking ban related item
     items.forEach((item) => {
       const title = item.querySelector('title')?.textContent || '';
+      const description = item.querySelector('description')?.textContent || '';
       const pubDate = item.querySelector('pubDate')?.textContent || '';
       const itemDate = new Date(pubDate);
 
-      // Check if this item is about parking ban
+      // Check if this item is about parking ban - search both title AND description
+      // Halifax sometimes bundles parking ban info in "Storm impacts" posts
+      const searchText = (title + ' ' + description).toLowerCase();
       const isParkingBanItem =
-        title.toLowerCase().includes('parking ban') ||
-        title.toLowerCase().includes('winter parking');
+        searchText.includes('parking ban') ||
+        searchText.includes('winter parking') ||
+        searchText.includes('overnight parking');
 
       if (isParkingBanItem && (!latestBanDate || itemDate > latestBanDate)) {
         latestBanDate = itemDate;
@@ -136,7 +140,12 @@ function App() {
 
     // Determine if ban is active or lifted
     const isLifted = content.includes('lifts') || content.includes('lifted');
-    const isEnforced = content.includes('enforced') || content.includes('will be enforced');
+    const isEnforced =
+      content.includes('enforced') ||
+      content.includes('will be enforced') ||
+      content.includes('in effect') ||
+      content.includes('declared') ||
+      content.includes('announcing');
     const isActive = isEnforced && !isLifted;
 
     // Check zone status - both zones are typically affected together in Halifax
