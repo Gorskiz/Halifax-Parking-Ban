@@ -108,18 +108,37 @@ function App() {
 
   // Parse the RSS feed to determine parking ban status
   const parseRSSFeed = useCallback((xmlText: string): ParkingBanStatus => {
-    // Validate that we received XML, not HTML (bot block page)
     const trimmedText = xmlText.trim();
     const isXML = trimmedText.startsWith('<?xml') ||
                    trimmedText.startsWith('<rss') ||
                    trimmedText.startsWith('<feed');
     const isHTML = trimmedText.toLowerCase().startsWith('<!doctype html') ||
-                    trimmedText.toLowerCase().startsWith('<html') ||
-                    trimmedText.includes('<title>Just a moment...</title>') || // Cloudflare challenge
-                    trimmedText.includes('cf-browser-verification'); // Cloudflare verification
+                    trimmedText.toLowerCase().startsWith('<html');
 
-    if (isHTML || !isXML) {
+    // Detect Cloudflare / CDN bot-challenge pages specifically.  These mean we
+    // are being actively blocked and the data is unreliable — throw so the
+    // caller can surface a useful error message.
+    const isBotBlock =
+      trimmedText.includes('<title>Just a moment...</title>') ||
+      trimmedText.includes('cf-browser-verification');
+
+    if (isBotBlock) {
       throw new Error('Halifax.ca returned HTML instead of XML. The site may be blocking automated requests. Please try again later or visit Halifax.ca directly.');
+    }
+
+    // Any other HTML (e.g. a "no results" / 404 page for an empty category)
+    // simply means there are no current parking-ban news items → not active.
+    if (isHTML || !isXML) {
+      return {
+        isActive: false,
+        zone1Active: false,
+        zone2Active: false,
+        enforcementDate: null,
+        enforcementTime: '1:00 AM - 6:00 AM',
+        lastUpdate: new Date(),
+        rawTitle: null,
+        link: '',
+      };
     }
 
     const parser = new DOMParser();

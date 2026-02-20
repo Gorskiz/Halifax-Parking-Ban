@@ -44,7 +44,7 @@ export const onRequest: PagesFunction = async (context) => {
 
     const xmlText = await response.text();
 
-    // Validate that we received XML, not HTML (bot block page)
+    // Validate that we received XML, not an HTML error/block page.
     const trimmedText = xmlText.trim();
     const isXML = trimmedText.startsWith('<?xml') ||
                    trimmedText.startsWith('<rss') ||
@@ -52,17 +52,37 @@ export const onRequest: PagesFunction = async (context) => {
     const isHTML = trimmedText.toLowerCase().startsWith('<!doctype html') ||
                     trimmedText.toLowerCase().startsWith('<html');
 
-    if (isHTML || !isXML) {
+    // Cloudflare / CDN bot-challenge pages — surface as an error so the
+    // client can show a useful message.
+    const isBotBlock =
+      xmlText.includes('Just a moment...') ||
+      xmlText.includes('cf-browser-verification');
+
+    if ((isHTML || !isXML) && isBotBlock) {
       return new Response(
         JSON.stringify({
           error: 'Halifax.ca returned HTML instead of XML. The site may be blocking automated requests.',
-          details: 'Received HTML/non-XML response from upstream'
+          details: 'Received bot-challenge page from upstream'
         }),
         {
           status: 503,
+          headers: { ...headers, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Any other non-XML response (e.g. empty-category HTML page) means there
+    // are no parking-ban news items — return a minimal empty RSS feed so the
+    // client correctly derives isActive: false without erroring.
+    if (isHTML || !isXML) {
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel></channel></rss>',
+        {
+          status: 200,
           headers: {
             ...headers,
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=60',
           },
         }
       );
