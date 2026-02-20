@@ -68,11 +68,28 @@ function App() {
         };
       }
 
-      // Cache expired, remove it
-      localStorage.removeItem(CACHE_KEY);
+      // Cache is expired but we intentionally keep it in localStorage so that
+      // getStaleCachedData() can use it as a last-resort fallback if all
+      // proxies fail.
       return null;
     } catch (err) {
       console.warn('Failed to read cache:', err);
+      return null;
+    }
+  }, []);
+
+  // Return any cached status regardless of age (used as fallback when all
+  // network requests fail so the user sees something rather than an error).
+  const getStaleCachedData = useCallback((): ParkingBanStatus | null => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (!cached) return null;
+      const data: CachedData = JSON.parse(cached);
+      return {
+        ...data.status,
+        lastUpdate: new Date(data.status.lastUpdate),
+      };
+    } catch {
       return null;
     }
   }, []);
@@ -130,7 +147,10 @@ function App() {
       const title = item.querySelector('title')?.textContent || '';
       const description = item.querySelector('description')?.textContent || '';
       const pubDate = item.querySelector('pubDate')?.textContent || '';
-      const itemDate = new Date(pubDate);
+      const parsedDate = new Date(pubDate);
+      // Guard against missing / malformed pubDate — fall back to epoch so the
+      // item is still considered but won't displace a valid date.
+      const itemDate = isNaN(parsedDate.getTime()) ? new Date(0) : parsedDate;
 
       // Check if this item is about parking ban - search both title AND description
       // Halifax sometimes bundles parking ban info in "Storm impacts" posts
@@ -226,21 +246,33 @@ function App() {
       return;
     }
 
+    // Show any stale cached data immediately so the user isn't staring at a
+    // spinner (or blank error page) while the network round-trip completes.
+    const staleStatus = getStaleCachedData();
+    if (staleStatus) {
+      setStatus(staleStatus);
+      setLoading(false);
+      // Don't return — continue fetching fresh data in the background.
+    }
+
     // If a fetch is already in progress, wait for it instead of starting a new one
     if (fetchInProgressRef.current) {
       try {
         const result = await fetchInProgressRef.current;
         setStatus(result);
-        setLoading(false);
         setError(null);
+        setLoading(false);
         return;
-      } catch (err) {
+      } catch {
         // The in-progress fetch failed, continue to try again
         fetchInProgressRef.current = null;
       }
     }
 
-    setLoading(true);
+    // Only show the loading spinner when there is no stale data to display.
+    if (!staleStatus) {
+      setLoading(true);
+    }
     setError(null);
 
     const TIMEOUT_MS = 8000; // 8 seconds per proxy
@@ -292,28 +324,44 @@ function App() {
     try {
       const result = await fetchPromise;
       setStatus(result);
+      setError(null);
       setLoading(false);
     } catch (err) {
       console.warn('All proxies failed:', err);
 
-      // Provide specific error message based on the error type
-      let errorMessage = 'Unable to fetch parking ban status. Please try again later.';
+      // If we already surfaced stale data, keep it visible — no error banner.
+      if (staleStatus) {
+        showToast('Could not refresh — showing last known status');
+        setLoading(false);
+        return;
+      }
 
-      if (err instanceof Error) {
-        const errMsg = err.message.toLowerCase();
-        if (errMsg.includes('html instead of xml') || errMsg.includes('blocking automated')) {
+      // Unwrap AggregateError (thrown by Promise.any when all promises reject)
+      // so we can inspect individual proxy failure messages.
+      const errors: unknown[] =
+        err instanceof AggregateError ? err.errors : [err];
+
+      // Build a human-readable message from the first recognisable error.
+      let errorMessage = 'Unable to fetch parking ban status. Please try again later.';
+      for (const e of errors) {
+        if (!(e instanceof Error)) continue;
+        const msg = e.message.toLowerCase();
+        if (msg.includes('html instead of xml') || msg.includes('blocking automated')) {
           errorMessage = 'Halifax.ca is currently blocking automated requests. Please visit Halifax.ca directly or try again in a few minutes.';
-        } else if (errMsg.includes('parse') || errMsg.includes('malformed')) {
+          break;
+        } else if (msg.includes('parse') || msg.includes('malformed')) {
           errorMessage = 'Unable to read the parking ban feed. Halifax.ca may be experiencing technical issues.';
-        } else if (errMsg.includes('timeout') || errMsg.includes('aborted')) {
+          break;
+        } else if (msg.includes('timeout') || msg.includes('aborted')) {
           errorMessage = 'Request timed out. Please check your internet connection and try again.';
+          break;
         }
       }
 
       setError(errorMessage);
       setLoading(false);
     }
-  }, [parseRSSFeed, fetchWithTimeout, getCachedData, setCachedData]);
+  }, [parseRSSFeed, fetchWithTimeout, getCachedData, setCachedData, getStaleCachedData]);
 
   // Ref to track countdown interval for cleanup
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -725,7 +773,7 @@ function App() {
 
             {/* Last Updated */}
             <p className="last-updated" role="contentinfo">
-              <span>Last updated: <time dateTime={status.lastUpdate.toISOString()}>{formatRelativeTime(status.lastUpdate)}</time></span>
+              <span>Last updated: <time dateTime={!isNaN(status.lastUpdate.getTime()) ? status.lastUpdate.toISOString() : ''}>{formatRelativeTime(status.lastUpdate)}</time></span>
               {' · '}
               <a
                 href={status.link || 'https://www.halifax.ca/transportation/winter-operations/parking-ban'}

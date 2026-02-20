@@ -16,12 +16,18 @@ export const onRequest: PagesFunction = async (context) => {
   }
 
   try {
+    // Abort the upstream fetch after 7 s so the Worker fails fast — the
+    // browser's own 8 s AbortController shouldn't have to carry the full wait.
+    const upstreamAbort = new AbortController();
+    const upstreamTimeoutId = setTimeout(() => upstreamAbort.abort(), 7000);
+
     const response = await fetch(RSS_FEED_URL, {
+      signal: upstreamAbort.signal,
       headers: {
         'User-Agent': 'Halifax-Parking-Ban-App/1.0',
         'Accept': 'application/rss+xml, application/xml, text/xml, */*',
       },
-    });
+    }).finally(() => clearTimeout(upstreamTimeoutId));
 
     if (!response.ok) {
       return new Response(
