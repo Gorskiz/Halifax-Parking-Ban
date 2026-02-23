@@ -13,13 +13,8 @@ interface ParkingBanStatus {
   link: string;
 }
 
-// RSS Feed URL (using a CORS proxy for client-side fetching)
-const RSS_FEED_URL = 'https://www.halifax.ca/news/category/rss-feed?category=22';
-// CORS proxy options
-const CORS_PROXIES = [
-  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-];
+// RSS feed is proxied server-side via our Cloudflare Worker to avoid CORS issues
+const RSS_PROXY_URL = '/api/rss';
 
 function App() {
   const [status, setStatus] = useState<ParkingBanStatus | null>(null);
@@ -112,30 +107,24 @@ function App() {
     };
   }, []);
 
-  // Fetch the RSS feed
+  // Fetch the RSS feed via our server-side Worker proxy
   const fetchStatus = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    for (const proxyFn of CORS_PROXIES) {
-      try {
-        const response = await fetch(proxyFn(RSS_FEED_URL));
-        if (!response.ok) continue;
+    try {
+      const response = await fetch(RSS_PROXY_URL);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-        const xmlText = await response.text();
-        const parsedStatus = parseRSSFeed(xmlText);
-        setStatus(parsedStatus);
-        setLoading(false);
-        return;
-      } catch (err) {
-        console.warn('Proxy failed, trying next...', err);
-        continue;
-      }
+      const xmlText = await response.text();
+      const parsedStatus = parseRSSFeed(xmlText);
+      setStatus(parsedStatus);
+    } catch (err) {
+      console.error('Failed to fetch RSS feed:', err);
+      setError('Unable to fetch parking ban status. Please try again later.');
+    } finally {
+      setLoading(false);
     }
-
-    // All proxies failed
-    setError('Unable to fetch parking ban status. Please try again later.');
-    setLoading(false);
   }, [parseRSSFeed]);
 
   // Ref to track countdown interval for cleanup
