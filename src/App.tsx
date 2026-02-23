@@ -126,19 +126,10 @@ function App() {
       throw new Error('Halifax.ca returned HTML instead of XML. The site may be blocking automated requests. Please try again later or visit Halifax.ca directly.');
     }
 
-    // Any other HTML (e.g. a "no results" / 404 page for an empty category)
-    // simply means there are no current parking-ban news items → not active.
+    // Any non-XML response (HTML 404 page, proxy error page, etc.) means the
+    // proxy itself failed — throw so Promise.any can try the next source.
     if (isHTML || !isXML) {
-      return {
-        isActive: false,
-        zone1Active: false,
-        zone2Active: false,
-        enforcementDate: null,
-        enforcementTime: '1:00 AM - 6:00 AM',
-        lastUpdate: new Date(),
-        rawTitle: null,
-        link: '',
-      };
+      throw new Error('Proxy returned HTML instead of XML — endpoint unavailable');
     }
 
     const parser = new DOMParser();
