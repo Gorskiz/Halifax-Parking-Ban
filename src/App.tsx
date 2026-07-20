@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
+import {
+  applySeasonGuard,
+  createOffSeasonStatus,
+  isParkingBanSeason,
+  type ParkingBanApiResponse,
+  type ParkingBanStatusPayload,
+} from './status';
 
 // Types
 interface ParkingBanStatus {
@@ -13,24 +20,19 @@ interface ParkingBanStatus {
   link: string;
 }
 
-// RSS Feed URL
-const RSS_FEED_URL = 'https://www.halifax.ca/news/category/rss-feed?category=22';
-
-// Fetch sources in order of preference:
-// 1. Our own Cloudflare Worker proxy (most reliable, no rate limits)
-// 2. AllOrigins as fallback (free tier, may have occasional issues)
-const FETCH_SOURCES = [
-  () => '/api/rss', // Local Cloudflare Worker proxy - no CORS issues
-  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-];
-
 // Cache configuration
 const CACHE_KEY = 'halifax-parking-ban-cache';
-const CACHE_DURATION_MS = 120000; // 2 minutes
 
 interface CachedData {
   status: ParkingBanStatus;
   timestamp: number;
+}
+
+function fromPayload(payload: ParkingBanStatusPayload): ParkingBanStatus {
+  return {
+    ...payload,
+    lastUpdate: new Date(payload.lastUpdate),
+  };
 }
 
 function App() {
@@ -57,39 +59,16 @@ function App() {
       if (!cached) return null;
 
       const data: CachedData = JSON.parse(cached);
-      const now = Date.now();
-
-      // Check if cache is still valid
-      if (now - data.timestamp < CACHE_DURATION_MS) {
-        // Reconstruct Date objects (they're serialized as strings in localStorage)
-        return {
+      const payload = applySeasonGuard(
+        {
           ...data.status,
-          lastUpdate: new Date(data.status.lastUpdate),
-        };
-      }
-
-      // Cache is expired but we intentionally keep it in localStorage so that
-      // getStaleCachedData() can use it as a last-resort fallback if all
-      // proxies fail.
-      return null;
+          lastUpdate: new Date(data.status.lastUpdate).toISOString(),
+        },
+        new Date(),
+      );
+      return fromPayload(payload);
     } catch (err) {
       console.warn('Failed to read cache:', err);
-      return null;
-    }
-  }, []);
-
-  // Return any cached status regardless of age (used as fallback when all
-  // network requests fail so the user sees something rather than an error).
-  const getStaleCachedData = useCallback((): ParkingBanStatus | null => {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (!cached) return null;
-      const data: CachedData = JSON.parse(cached);
-      return {
-        ...data.status,
-        lastUpdate: new Date(data.status.lastUpdate),
-      };
-    } catch {
       return null;
     }
   }, []);
@@ -106,166 +85,16 @@ function App() {
     }
   }, []);
 
-  // Parse the RSS feed to determine parking ban status
-  const parseRSSFeed = useCallback((xmlText: string): ParkingBanStatus => {
-    const trimmedText = xmlText.trim();
-    const isXML = trimmedText.startsWith('<?xml') ||
-                   trimmedText.startsWith('<rss') ||
-                   trimmedText.startsWith('<feed');
-    const isHTML = trimmedText.toLowerCase().startsWith('<!doctype html') ||
-                    trimmedText.toLowerCase().startsWith('<html');
-
-    // Detect Cloudflare / CDN bot-challenge pages specifically.  These mean we
-    // are being actively blocked and the data is unreliable — throw so the
-    // caller can surface a useful error message.
-    const isBotBlock =
-      trimmedText.includes('<title>Just a moment...</title>') ||
-      trimmedText.includes('cf-browser-verification');
-
-    if (isBotBlock) {
-      throw new Error('Halifax.ca returned HTML instead of XML. The site may be blocking automated requests. Please try again later or visit Halifax.ca directly.');
-    }
-
-    // Any non-XML response (HTML 404 page, proxy error page, etc.) means the
-    // proxy itself failed — throw so Promise.any can try the next source.
-    if (isHTML || !isXML) {
-      throw new Error('Proxy returned HTML instead of XML — endpoint unavailable');
-    }
-
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-
-    // Check for XML parsing errors
-    const parserError = xmlDoc.querySelector('parsererror');
-    if (parserError) {
-      throw new Error('Failed to parse RSS feed. The response may be malformed or blocked by Halifax.ca.');
-    }
-
-    // Validate RSS structure
-    const rssRoot = xmlDoc.querySelector('rss, feed');
-    if (!rssRoot) {
-      throw new Error('Invalid RSS feed structure. Halifax.ca may be returning an error page.');
-    }
-
-    const items = xmlDoc.querySelectorAll('item');
-
-    let latestBanItem: Element | null = null;
-    let latestBanDate: Date | null = null;
-
-    // Find the most recent parking ban related item
-    items.forEach((item) => {
-      const title = item.querySelector('title')?.textContent || '';
-      const description = item.querySelector('description')?.textContent || '';
-      const pubDate = item.querySelector('pubDate')?.textContent || '';
-      const parsedDate = new Date(pubDate);
-      // Guard against missing / malformed pubDate — fall back to epoch so the
-      // item is still considered but won't displace a valid date.
-      const itemDate = isNaN(parsedDate.getTime()) ? new Date(0) : parsedDate;
-
-      // Check if this item is about parking ban - search both title AND description
-      // Halifax sometimes bundles parking ban info in "Storm impacts" posts
-      const searchText = (title + ' ' + description).toLowerCase();
-      const isParkingBanItem =
-        searchText.includes('parking ban') ||
-        searchText.includes('winter parking') ||
-        searchText.includes('overnight parking');
-
-      if (isParkingBanItem && (!latestBanDate || itemDate > latestBanDate)) {
-        latestBanDate = itemDate;
-        latestBanItem = item;
-      }
-    });
-
-    if (!latestBanItem || !latestBanDate) {
-      // No parking ban news found - assume ban is not active
-      return {
-        isActive: false,
-        zone1Active: false,
-        zone2Active: false,
-        enforcementDate: null,
-        enforcementTime: '1:00 AM - 6:00 AM',
-        lastUpdate: new Date(),
-        rawTitle: 'No recent parking ban announcements',
-        link: 'https://www.halifax.ca/transportation/winter-operations/parking-ban',
-      };
-    }
-
-    const title = (latestBanItem as Element).querySelector('title')?.textContent || '';
-    const description = (latestBanItem as Element).querySelector('description')?.textContent || '';
-    const link = (latestBanItem as Element).querySelector('link')?.textContent || '';
-    const content = (title + ' ' + description).toLowerCase();
-
-    // Determine if ban is active or lifted
-    const isLifted = content.includes('lifts') || content.includes('lifted');
-    const isEnforced =
-      content.includes('enforced') ||
-      content.includes('will be enforced') ||
-      content.includes('in effect') ||
-      content.includes('declared') ||
-      content.includes('announcing');
-    const isActive = isEnforced && !isLifted;
-
-    // Check zone status - both zones are typically affected together in Halifax
-    // But we'll parse them separately just in case
-    const zone1Mentioned = content.includes('zone 1') || content.includes('zone 1 – central');
-    const zone2Mentioned = content.includes('zone 2') || content.includes('zone 2 – non-central');
-    const bothZones = (zone1Mentioned && zone2Mentioned) ||
-      content.includes('both zone') ||
-      (!zone1Mentioned && !zone2Mentioned); // If no specific zone, assume both
-
-    // Extract date from title
-    let enforcementDate: string | null = null;
-    const dateMatch = title.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*(?:Jan\.?|Feb\.?|Mar\.?|Apr\.?|May|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Oct\.?|Nov\.?|Dec\.?)\s*\d+/i);
-    if (dateMatch) {
-      enforcementDate = dateMatch[0].replace(/\./g, '');
-    }
-
-    return {
-      isActive,
-      zone1Active: isActive && (zone1Mentioned || bothZones),
-      zone2Active: isActive && (zone2Mentioned || bothZones),
-      enforcementDate,
-      enforcementTime: '1:00 AM - 6:00 AM',
-      lastUpdate: latestBanDate,
-      rawTitle: title,
-      link,
-    };
-  }, []);
-
-  // Fetch with a timeout using AbortController
-  const fetchWithTimeout = useCallback(async (url: string, timeoutMs: number): Promise<Response> => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(url, { signal: controller.signal });
-      return response;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }, []);
-
-  // Fetch the RSS feed - race all proxies concurrently with individual timeouts
+  // Fetch the normalized status from our Worker. A local value is painted
+  // immediately, but every page load still revalidates it in the background.
   const fetchStatus = useCallback(async () => {
-    // Check cache first
     const cachedStatus = getCachedData();
     if (cachedStatus) {
-      // Return cached data immediately
       setStatus(cachedStatus);
       setLoading(false);
       setError(null);
-      return;
     }
 
-    // Show any stale cached data immediately so the user isn't staring at a
-    // spinner (or blank error page) while the network round-trip completes.
-    const staleStatus = getStaleCachedData();
-    if (staleStatus) {
-      setStatus(staleStatus);
-      setLoading(false);
-      // Don't return — continue fetching fresh data in the background.
-    }
-
-    // If a fetch is already in progress, wait for it instead of starting a new one
     if (fetchInProgressRef.current) {
       try {
         const result = await fetchInProgressRef.current;
@@ -279,52 +108,30 @@ function App() {
       }
     }
 
-    // Only show the loading spinner when there is no stale data to display.
-    if (!staleStatus) {
+    if (!cachedStatus) {
       setLoading(true);
     }
     setError(null);
 
-    const TIMEOUT_MS = 8000; // 8 seconds per proxy
-
-    // Create and store the fetch promise
     const fetchPromise = (async (): Promise<ParkingBanStatus> => {
       try {
-        // Race all sources concurrently - first successful response wins
-        const result = await Promise.any(
-          FETCH_SOURCES.map(async (sourceFn) => {
-            const url = sourceFn(RSS_FEED_URL);
-            const response = await fetchWithTimeout(url, TIMEOUT_MS);
+        const response = await fetch('/api/status', {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error(`Status endpoint returned HTTP ${response.status}`);
 
-            // Check if we got a JSON error response
-            const contentType = response.headers.get('content-type') || '';
-            if (contentType.includes('application/json')) {
-              const errorData = await response.json();
-              throw new Error(errorData.error || `HTTP ${response.status}`);
-            }
-
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}`);
-            }
-
-            const text = await response.text();
-
-            // Verify we got XML, not an error JSON response (double-check)
-            if (text.trim().startsWith('{')) {
-              const errorData = JSON.parse(text);
-              throw new Error(errorData.error || 'Received JSON error instead of XML');
-            }
-
-            // parseRSSFeed will throw if validation fails
-            return parseRSSFeed(text);
-          })
-        );
-
-        // Cache the successful result
+        const payload = (await response.json()) as ParkingBanApiResponse;
+        if (!payload.verified) {
+          throw new Error('The current in-season status could not be verified');
+        }
+        const result = fromPayload(payload.status);
         setCachedData(result);
+        if (payload.stale) {
+          showToast('Live source delayed — showing the last verified status');
+        }
         return result;
       } finally {
-        // Clear the in-progress reference when done
         fetchInProgressRef.current = null;
       }
     })();
@@ -337,41 +144,28 @@ function App() {
       setError(null);
       setLoading(false);
     } catch (err) {
-      console.warn('All proxies failed:', err);
+      console.warn('Status refresh failed:', err);
 
-      // If we already surfaced stale data, keep it visible — no error banner.
-      if (staleStatus) {
-        showToast('Could not refresh — showing last known status');
+      if (cachedStatus) {
+        showToast('Could not refresh — showing the last verified status');
         setLoading(false);
         return;
       }
 
-      // Unwrap AggregateError (thrown by Promise.any when all promises reject)
-      // so we can inspect individual proxy failure messages.
-      const errors: unknown[] =
-        err instanceof AggregateError ? err.errors : [err];
-
-      // Build a human-readable message from the first recognisable error.
-      let errorMessage = 'Unable to fetch parking ban status. Please try again later.';
-      for (const e of errors) {
-        if (!(e instanceof Error)) continue;
-        const msg = e.message.toLowerCase();
-        if (msg.includes('html instead of xml') || msg.includes('blocking automated')) {
-          errorMessage = 'Halifax.ca is currently blocking automated requests. Please visit Halifax.ca directly or try again in a few minutes.';
-          break;
-        } else if (msg.includes('parse') || msg.includes('malformed')) {
-          errorMessage = 'Unable to read the parking ban feed. Halifax.ca may be experiencing technical issues.';
-          break;
-        } else if (msg.includes('timeout') || msg.includes('aborted')) {
-          errorMessage = 'Request timed out. Please check your internet connection and try again.';
-          break;
-        }
+      const now = new Date();
+      if (isParkingBanSeason(now)) {
+        setError('The live status is temporarily unavailable. Check Halifax.ca before parking on the street.');
+        setLoading(false);
+        return;
       }
 
-      setError(errorMessage);
+      const fallbackStatus = fromPayload(createOffSeasonStatus(now));
+      setStatus(fallbackStatus);
+      setCachedData(fallbackStatus);
       setLoading(false);
+      showToast('Using Halifax’s published off-season dates');
     }
-  }, [parseRSSFeed, fetchWithTimeout, getCachedData, setCachedData, getStaleCachedData]);
+  }, [getCachedData, setCachedData]);
 
   // Ref to track countdown interval for cleanup
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
